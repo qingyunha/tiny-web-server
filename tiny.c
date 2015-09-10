@@ -14,6 +14,12 @@ void serve_dynamic(int fd, char *filename, char *cgiargs);
 void clienterror(int fd, char *cause, char *errnum, 
 		 char *shortmsg, char *longmsg);
 
+/* my add function*/
+void regist_signal_handler();
+void handle_pipe(int sig);
+void handle_child(int sig);
+
+
 int main(int argc, char **argv) 
 {
     int listenfd, connfd, port, clientlen;
@@ -25,6 +31,9 @@ int main(int argc, char **argv)
 	exit(1);
     }
     port = atoi(argv[1]);
+
+	regist_signal_handler();
+
 
     listenfd = Open_listenfd(port);
     while (1) {
@@ -51,6 +60,7 @@ void doit(int fd)
     /* Read request line and headers */
     Rio_readinitb(&rio, fd);
     Rio_readlineb(&rio, buf, MAXLINE);                   
+	printf("%s", buf);
     sscanf(buf, "%s %s %s", method, uri, version);       
     if (strcasecmp(method, "GET")) {                     
        clienterror(fd, method, "501", "Not Implemented",
@@ -94,11 +104,11 @@ void read_requesthdrs(rio_t *rp)
 {
     char buf[MAXLINE];
 
-    Rio_readlineb(rp, buf, MAXLINE);
-    while(strcmp(buf, "\r\n")) {          
-	Rio_readlineb(rp, buf, MAXLINE);
+	do{
+	if(Rio_readlineb(rp, buf, MAXLINE) == 0) //check out the EOF case
+		return;
 	printf("%s", buf);
-    }
+    } while(strcmp(buf, "\r\n") && strcmp(buf,"\n")); //for nc test     
     return;
 }
 /* $end read_requesthdrs */
@@ -171,6 +181,8 @@ void get_filetype(char *filename, char *filetype)
 	strcpy(filetype, "image/gif");
     else if (strstr(filename, ".jpg"))
 	strcpy(filetype, "image/jpeg");
+    else if (strstr(filename, ".mp4"))
+	strcpy(filetype, "video/mp4");
     else
 	strcpy(filetype, "text/plain");
 }  
@@ -196,7 +208,7 @@ void serve_dynamic(int fd, char *filename, char *cgiargs)
 	Dup2(fd, STDOUT_FILENO);         /* Redirect stdout to client */ 
 	Execve(filename, emptylist, environ); /* Run CGI program */ 
     }
-    Wait(NULL); /* Parent waits for and reaps child */ 
+ //   Wait(NULL); /* Parent waits for and reaps child */ 
 }
 /* $end serve_dynamic */
 
@@ -226,3 +238,45 @@ void clienterror(int fd, char *cause, char *errnum,
     Rio_writen(fd, body, strlen(body));
 }
 /* $end clienterror */
+
+void regist_signal_handler()
+{
+	if(signal(SIGPIPE, handle_pipe) == SIG_ERR)
+		unix_error("signal error");
+	if(signal(SIGCHLD, handle_child) == SIG_ERR)
+		unix_error("signal error");
+	
+}
+
+void handle_pipe(sig)
+{
+	printf("Caught SIGPIPE");
+	exit(3);
+}
+
+void handle_child(sig)
+{
+	pid_t pid;
+	while((pid = waitpid(-1, NULL, 0)) > 0)
+		printf("Handler reaped child %d\n", (int)pid);
+	
+	if(errno != ECHILD)
+		unix_error("waitpid error");
+	
+	return;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
