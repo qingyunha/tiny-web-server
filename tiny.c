@@ -18,11 +18,14 @@ void clienterror(int fd, char *cause, char *errnum,
 void regist_signal_handler();
 void handle_pipe(int sig);
 void handle_child(int sig);
+void handle_int(int sig);
 
+sigjmp_buf jmpenv;
+int connfd;
 
 int main(int argc, char **argv) 
 {
-    int listenfd, connfd, port, clientlen;
+    int listenfd, port, clientlen;
     struct sockaddr_in clientaddr;
 
     /* Check command line args */
@@ -36,6 +39,10 @@ int main(int argc, char **argv)
 
 
     listenfd = Open_listenfd(port);
+	
+	if(sigsetjmp(jmpenv,1) != 0)
+		Close(connfd);
+
     while (1) {
 	clientlen = sizeof(clientaddr);
 	connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen); 
@@ -245,13 +252,15 @@ void regist_signal_handler()
 		unix_error("signal error");
 	if(signal(SIGCHLD, handle_child) == SIG_ERR)
 		unix_error("signal error");
+	if(signal(SIGINT, handle_int) == SIG_ERR)
+		unix_error("signal error");
 	
 }
 
 void handle_pipe(sig)
 {
-	printf("Caught SIGPIPE");
-	exit(3);
+	printf("Caught SIGPIPE\n");
+	siglongjmp(jmpenv, 1);
 }
 
 void handle_child(sig)
@@ -266,6 +275,11 @@ void handle_child(sig)
 	return;
 }
 
+void handle_int(sig)
+{
+	printf("tiny server stop\n");
+	exit(0);
+}
 
 
 
