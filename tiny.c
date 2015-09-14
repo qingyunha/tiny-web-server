@@ -20,8 +20,15 @@ void handle_pipe(int sig);
 void handle_child(int sig);
 void handle_int(int sig);
 
+int request_bytes_range();
+void serve_bytes_range(char *filename, int filesize);
+
 sigjmp_buf jmpenv;
 int connfd;
+
+#define MAXHEADS 20
+char headers[MAXHEADS][MAXLINE];
+
 
 int main(int argc, char **argv) 
 {
@@ -109,13 +116,16 @@ void doit(int fd)
 /* $begin read_requesthdrs */
 void read_requesthdrs(rio_t *rp) 
 {
-    char buf[MAXLINE];
-
+	int i = 0;
+	
 	do{
-	if(Rio_readlineb(rp, buf, MAXLINE) == 0) //check out the EOF case
+	if(Rio_readlineb(rp, headers[i], MAXLINE) == 0) //check out the EOF case
 		return;
-	printf("%s", buf);
-    } while(strcmp(buf, "\r\n") && strcmp(buf,"\n")); //for nc test     
+	printf("%s", headers[i]);
+	i++;
+    } while(strcmp(headers[i-1], "\r\n") 
+				&& strcmp(headers[i-1],"\n")); //for nc test     
+	headers[i][0] = '\0';
     return;
 }
 /* $end read_requesthdrs */
@@ -162,6 +172,10 @@ void serve_static(int fd, char *filename, int filesize)
     char *srcp, filetype[MAXLINE], buf[MAXBUF];
  
     /* Send response headers to client */
+	if(request_bytes_range()){
+		serve_bytes_range(filename, filesize);
+		return;
+	}
     get_filetype(filename, filetype);       
     sprintf(buf, "HTTP/1.0 200 OK\r\n");    
     sprintf(buf, "%sServer: Tiny Web Server\r\n", buf);
@@ -282,12 +296,55 @@ void handle_int(sig)
 }
 
 
+int request_bytes_range()
+{
+	int i;
+	for(i=0; headers[i][0] != '\0'; i++)
+		if(strcasestr(headers[i], "range"))
+			return 1;
+	return 0;
+}
 
 
+void serve_bytes_range(char *filename, int filesize)
+{ 
+	char buf[MAXBUF];
+	char *srcp;
+	int start, end;
+	int srcfd;
 
+	get_bytes_range(&start, &end);
 
+	sprintf(buf, "HTTP/1.1 206 Partial Content\r\n");    
+    sprintf(buf, "%sServer: Tiny Web Server\r\n", buf);
+    sprintf(buf, "%sContent-length: %d\r\n", buf, end-start+1 );
+    sprintf(buf, "%sContent-type: text/plain\r\n", buf);
+	sprintf(buf, "%sContent-range: bytes %d-%d/%d\r\n\r\n", buf, start, end,
+															filesize);
+	
+    Rio_writen(connfd, buf, strlen(buf));       
+    /* Send response body to client */
+    srcfd = Open(filename, O_RDONLY, 0);    
+    srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
+    Close(srcfd);                           
+    Rio_writen(connfd, srcp+start, end-start+1);         
+    Munmap(srcp, filesize);                 
+   
+}
 
+int get_bytes_range(int *start, int *end)
+{
+	int i, matches;
+	for(i=0; headers[i][0] != '\0'; i++)
+		if(strcasestr(headers[i], "range"))
+			break;
 
+	if((matches = sscanf(headers[i], "%*s bytes=%d-%d", start, end)) != EOF)
+		printf("match %d, bytes range is %d-%d\n",matches, *start, *end);
+	else
+		fprintf(stderr, "bytes range match fails: %s\n", strerror(errno));	
+	return matches;
+}
 
 
 
