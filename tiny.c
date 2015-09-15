@@ -204,6 +204,8 @@ void get_filetype(char *filename, char *filetype)
 	strcpy(filetype, "image/jpeg");
     else if (strstr(filename, ".mp4"))
 	strcpy(filetype, "video/mp4");
+    else if (strstr(filename, "tar"))
+	strcpy(filetype, "application/x-tar");
     else
 	strcpy(filetype, "text/plain");
 }  
@@ -224,9 +226,14 @@ void serve_dynamic(int fd, char *filename, char *cgiargs)
     Rio_writen(fd, buf, strlen(buf));
   
     if (Fork() == 0) { /* child */ 
-	/* Real server would set all CGI vars here */
+	/* Real server would set all CGI vars here. see rfc 3875  */
 	setenv("QUERY_STRING", cgiargs, 1); 
+	setenv("CONTENT_LENGTH", "", 1); /* Should get from 'content-length' */
+	setenv("CONTENT_TYPE", "", 1); /* Also should get from request header' */
+	setenv("GETEWAY_INTERFACE", "CGI/1.1", 1);
+
 	Dup2(fd, STDOUT_FILENO);         /* Redirect stdout to client */ 
+	Dup2(fd, STDIN_FILENO); 
 	Execve(filename, emptylist, environ); /* Run CGI program */ 
     }
  //   Wait(NULL); /* Parent waits for and reaps child */ 
